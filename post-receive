@@ -1,0 +1,100 @@
+#! /usr/bin/env ruby
+
+require 'net/http'
+require 'json'
+
+def help
+  puts "Some required config options have not been setup, please contact the repo admin"
+  exit
+end
+
+# The following options are required:
+#      git config hooks.upsource.url 'https://upsource-url.com'
+#      git config hooks.upsource.project-id 'upsource-projectid'
+#      git config hooks.upsource.reference 'devel' (name of reference to review)
+#      git config hooks.upsource.auth 'XXXXX' (base64 encoded login:password to communicate with Upsource)
+# The following options are optional:
+#      git config hooks.upsource.review-group 'Reviewers' (Group ID for default reviewers to be assigned, if null no assignments will be made)
+@options = {
+  :required => {
+    :url => `git config --get hooks.upsource.url` || nil,
+    :project => `git config --get hooks.upsource.project-id` || nil,
+    :ref => `git config --get hooks.upsource.reference` || nil,
+    :auth => `git config --get hooks.upsource.auth` || nil
+  },
+  :optional => {
+    :group => `git config --get hooks.upsource.review-group` || nil
+  }
+}
+
+# Check our require opts
+help() if @options[:required].has_value?(nil) || @options[:required].values.map { |v| v.strip }.any?(&:empty?)
+
+# Sanitize our inputs
+@options[:required].values.map! { |opt| opt.strip! }
+@options[:optional].values.map! { |opt| opt.strip! unless opt.nil? }
+
+@uri = URI.parse(@options[:required][:url])
+@http = Net::HTTP.new(@uri.host, @uri.port)
+@http.use_ssl = true if @options[:required][:url].include?('https://')
+
+$stdin.each { |line|
+  oldrev, newrev, ref = line.strip.split
+  branch = `git rev-parse --symbolic --abbrev-ref #{ref}`
+
+  # We received some commits, so lets update the Upsource project
+  notify_response = @http.request_get('/~vcs/upsource-test')
+  print "Notifying Upsource of the source update..."
+  if (notify_response.code.to_i != 200)
+    puts "... FAILED (#{notify_response.code}) - No code review will be created"
+    exit
+  end
+  sleep(5)
+  puts "...success"
+
+  # Now ensure that the reference we are interested in was updated, if so create that review
+  if (branch.strip! === @options[:required][:ref])
+    commits = `git rev-list #{oldrev}..#{newrev}`.split("\n").reverse
+    if (commits.size > 0)
+      review = {
+        'projectId' => @options[:required][:project],
+        'revisions' => commits.map { |commit| commit.strip }
+      }
+
+      review_response = @http.request_post('/~rpc/createReview', review.to_json, {
+        'Content-Type' => 'application/json',
+        'Authorization' => "Basic #{@options[:required][:auth]}"
+      })
+
+      if (review_response.code.to_i === 200)
+        data = JSON.parse(review_response.body)
+        review_id = data['result']['reviewId']
+        puts "Review ID #{review_id['reviewId']} created"
+
+        # Assign our default users, if set
+        if (!@options[:optional][:group].nil? && !@options[:optional][:group].strip.empty?)
+          review_group = {
+            'reviewId' => review_id,
+            'groupId' => @options[:optional][:group].strip,
+            'role' => 2
+          }
+          assign_response = @http.request_post('/~rpc/addGroupToReview', review_group.to_json, {
+            'Content-Type' => 'application/json',
+            'Authorization' => "Basic #{@options[:required][:auth]}"
+          })
+
+          if (assign_response.code.to_i === 200)
+            puts "Default review group '#{@options[:optional][:group]}' assigned to review"
+          else
+            puts "The default review group '#{@options[:optional][:group]}' could NOT be assigned, manaully assign reviewers"
+          end
+        else
+          puts "No default review group is set, please manually add reviewers in Upsource"
+        end
+      else
+        puts "There was an error creating the code review: #{review_response.code} -> #{review_response.body}"
+      end
+    end
+  end
+}
+
