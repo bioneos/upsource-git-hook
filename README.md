@@ -6,15 +6,6 @@ This git post-receive hook will automatically create a new code review in Upsour
 
 No external gems are required and this should work out of the box.
 
-## Why would I need this?
-At [Bio::Neos, Inc](http://bioneos.com), we employ the [Git Flow](https://nvie.com/posts/a-successful-git-branching-model/) strategy for our version control paradigm. We really like the workflow as it keeps our repositories clean and we love that linear history! A part of the Git Workflow is that you never push your feature branches, you merge them back into a branch (ours is typically `devel`). This plays a big reason with why we needed to make this hook...
-
-Another key component of our tooling is [Upsource](https://www.jetbrains.com/upsource/) for efficient code reviews. Upsource is a really nice system for performing code reviews, but it only allows for code reviews on post-commit code. And moreso, it is really geared towards reviewing a branch as a whole. And here is the gotchya! for us, we never push our branches so we are always doing a code review on one branch. Now, we certainly could all go ahead and `push` our code, then login to Upsource and create a review with the appropriate commits and then assign reviewers. But lets be honest, we always forget. We tried to make this a part of our workflow but everyone forgot. So we thought we'd try having Upsource automatically make a review for us when code was pushed. There are two options for that:
-1. Create a review for **every** commit that is pushed, which can result in a completely unmanageable number of review **or**
-2. Append commits to an existing, open review. This works as long as the reviews are closed as quickly as possible, otherwise completely unrelated commits can appear in the same review.
-
-So we were left with either forgetting to create a code review or having nonsense reviews. But then we thought, couldn't we use a Git hook? We would know the `reference` that was updated and all the commit hashes that were pushed. And Upsource has a great [API](https://upsource.jetbrains.com/~api_doc/index.html) available to use! So off we went, seeing if we could make these reviews easier on our developers...
-
 ## What do I need for this to work?
 You need to:
 1. Place this `post-receive` hook in your `<repo>/hooks` directory (make sure it is executable and owned by the correct user/group!)
@@ -30,4 +21,16 @@ If you are like us and had multiple scripts you wanted to run on the `post-recei
 The Upsource API is available by default, however to make requests you need to be authorized. The API uses Basic authorization by specifying the `Authorization` header. The token is to be your `login:password`, Base64 encoded.
 
 ### Git config variables
-TODO
+The following variables need to be configured for the hook to work properly (these can be set with `git config hooks.upsource.xxxx 'value'`:
+* `url` - This should be the URL of your upsource installation
+* `project-id` - The Upsource ID of the project you will be creating reviews on
+* `reference` - The git reference that you want to monitor (e.g., `devel`, `master`, `releases`, etc)
+* `auth` - Your `login:password` to be used for authenticating to Upsource, Base64 encoded
+* `review-group` (optional) - If you would like to automatically have a group of users assigned to the review, this is the ID of the Group to assign. If you do not specify this, you will need to manually assign reviewers in Upsource
+
+## TODO
+This is a quick and dirty implementation that was whipped up to make creating reviews easier on our developers and to help maintain our review process. There are a few things that can (and hopefully will) be improved:
+* Right now we can only monitor one git reference, ideally we could specify a wildcard and catch any updates
+* Only a review group can be assigned automatically now, individual user assignments would be great
+* I think Upsource now lets you use an API token for accessing the API, which would be **way** better than storing the Base64 encoded credentials
+* `sleep(5)`?!?!?! This one is embarrassing, but yes our hook is doing a sleep. This is required because while we do tell Upsource that there was a change to the repo, we do not know when Upsource has finished `pull`-ing down the updates. If we try to create the review too early, it will fail because Upsource will not yet know about the revisions. I haven't looked too closely, but maybe there is a blocking API call or some way to poll the Upsource project to figure out if the update has completed. Hey, I said this was quick and dirty!
