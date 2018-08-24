@@ -75,7 +75,7 @@ $stdin.each { |line|
       # Poll for ~60 seconds and if after the revision is not present, abort
       print "Waiting for Upsource to retrieve all revisions..."
       STDOUT.flush
-      while (!revision_present and poll_attempts < @options[:required][:poll])
+      while (!revision_present and poll_attempts < @options[:required][:poll].to_i)
         poll_attempts += 1
         sleep(1)
         
