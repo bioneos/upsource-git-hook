@@ -13,6 +13,7 @@ end
 #      git config hooks.upsource.project-id 'upsource-projectid'
 #      git config hooks.upsource.reference 'devel' (name of reference to review)
 #      git config hooks.upsource.auth 'XXXXX' (base64 encoded login:password to communicate with Upsource)
+#      git config hooks.upsource.poll-max '60'
 # The following options are optional:
 #      git config hooks.upsource.review-group 'Reviewers' (Group ID for default reviewers to be assigned, if null no assignments will be made)
 @options = {
@@ -20,7 +21,8 @@ end
     :url => `git config --get hooks.upsource.url` || nil,
     :project => `git config --get hooks.upsource.project-id` || nil,
     :ref => `git config --get hooks.upsource.reference` || nil,
-    :auth => `git config --get hooks.upsource.auth` || nil
+    :auth => `git config --get hooks.upsource.auth` || nil,
+    :poll => `git config --get hooks.upsource.poll-max` || nil
   },
   :optional => {
     :group => `git config --get hooks.upsource.review-group` || nil
@@ -73,7 +75,7 @@ $stdin.each { |line|
       # Poll for ~60 seconds and if after the revision is not present, abort
       print "Waiting for Upsource to retrieve all revisions..."
       STDOUT.flush
-      while (!revision_present and poll_attempts < 60)
+      while (!revision_present and poll_attempts < @options[:required][:poll])
         poll_attempts += 1
         sleep(1)
         
