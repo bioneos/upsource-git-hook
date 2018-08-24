@@ -33,4 +33,3 @@ This is a quick and dirty implementation that was whipped up to make creating re
 * Right now we can only monitor one git reference, ideally we could specify a wildcard and catch any updates
 * Only a review group can be assigned automatically now, individual user assignments would be great
 * I think Upsource now lets you use an API token for accessing the API, which would be **way** better than storing the Base64 encoded credentials
-* `sleep(5)`?!?!?! This one is embarrassing, but yes our hook is doing a sleep. This is required because while we do tell Upsource that there was a change to the repo, we do not know when Upsource has finished `pull`-ing down the updates. If we try to create the review too early, it will fail because Upsource will not yet know about the revisions. I haven't looked too closely, but maybe there is a blocking API call or some way to poll the Upsource project to figure out if the update has completed. Hey, I said this was quick and dirty!

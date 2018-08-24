@@ -43,24 +43,64 @@ $stdin.each { |line|
   branch = `git rev-parse --symbolic --abbrev-ref #{ref}`
 
   # We received some commits, so lets update the Upsource project
-  notify_response = @http.request_get('/~vcs/upsource-test')
+  notify_response = @http.request_get("/~vcs/#{@options[:required][:project]}")
   print "Notifying Upsource of the source update..."
+  STDOUT.flush
   if (notify_response.code.to_i != 200)
     puts "... FAILED (#{notify_response.code}) - No code review will be created"
     exit
   end
-  sleep(5)
   puts "...success"
+  STDOUT.flush
 
   # Now ensure that the reference we are interested in was updated, if so create that review
   if (branch.strip! === @options[:required][:ref])
-    commits = `git rev-list #{oldrev}..#{newrev}`.split("\n").reverse
+    commits = `git rev-list #{oldrev}..#{newrev}`.split("\n")
     if (commits.size > 0)
       review = {
         'projectId' => @options[:required][:project],
         'revisions' => commits.map { |commit| commit.strip }
       }
 
+      # Now, poll our revisions in Upsource until our latest revision is present
+      revision_present = false
+      poll_attempts = 0
+      poll = {
+        'projectId' => @options[:required][:project],
+        'limit' => 1
+      }
+
+      # Poll for ~60 seconds and if after the revision is not present, abort
+      print "Waiting for Upsource to retrieve all revisions..."
+      STDOUT.flush
+      while (!revision_present and poll_attempts < 60)
+        poll_attempts += 1
+        sleep(1)
+        
+        poll_response = @http.request_post('/~rpc/getRevisionsList', poll.to_json, {
+          'Content-Type' => 'application/json',
+          'Authorization' => "Basic #{@options[:required][:auth]}"
+        })
+        
+        if (poll_response.code.to_i != 200)
+          # The server did not properly respond to our poll, quit trying to create review
+          puts "The Upsource server did not respond to our polling request, aborting automatic review creation..."
+          exit
+        end
+
+        poll_data = JSON.parse(poll_response.body)
+        revision_present = (poll_data['result']['revision'][0]['revisionId'] === commits.first.strip)
+      end
+
+      if (!revision_present)
+        # The server did not properly respond to our poll, quit trying to create review
+        puts "...Upsource has not retrieved all revisions after 60 seconds, aborting automatic review creation..."
+        puts "[DEBUG] Was looking for revision #{commits.first.strip}"
+        exit
+      else
+        puts "...success"
+      end
+      
       review_response = @http.request_post('/~rpc/createReview', review.to_json, {
         'Content-Type' => 'application/json',
         'Authorization' => "Basic #{@options[:required][:auth]}"
@@ -68,6 +108,7 @@ $stdin.each { |line|
 
       if (review_response.code.to_i === 200)
         data = JSON.parse(review_response.body)
+        puts "[DEBUG] response body [code -> #{review_response.code}: #{review_response.body}, data: #{data}"
         review_id = data['result']['reviewId']
         puts "Review ID #{review_id['reviewId']} created"
 
