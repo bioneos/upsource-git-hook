@@ -110,7 +110,6 @@ $stdin.each { |line|
 
       if (review_response.code.to_i === 200)
         data = JSON.parse(review_response.body)
-        puts "[DEBUG] response body [code -> #{review_response.code}: #{review_response.body}, data: #{data}"
         review_id = data['result']['reviewId']
         puts "Review ID #{review_id['reviewId']} created"
 
