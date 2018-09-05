@@ -25,7 +25,8 @@ end
     :poll => `git config --get hooks.upsource.poll-max` || nil
   },
   :optional => {
-    :group => `git config --get hooks.upsource.review-group` || nil
+    :group => `git config --get hooks.upsource.review-group` || nil,
+    :append => `git config --get hooks.upsource.allow-append` || nil
   }
 }
 
@@ -59,11 +60,6 @@ $stdin.each { |line|
   if (branch.strip! === @options[:required][:ref])
     commits = `git rev-list #{oldrev}..#{newrev}`.split("\n")
     if (commits.size > 0)
-      review = {
-        'projectId' => @options[:required][:project],
-        'revisions' => commits.map { |commit| commit.strip }
-      }
-
       # Now, poll our revisions in Upsource until our latest revision is present
       revision_present = false
       poll_attempts = 0
@@ -103,38 +99,78 @@ $stdin.each { |line|
         puts "...success"
       end
       
-      review_response = @http.request_post('/~rpc/createReview', review.to_json, {
-        'Content-Type' => 'application/json',
-        'Authorization' => "Basic #{@options[:required][:auth]}"
-      })
+      # Now that all our revisions are here, look to see if our last commit message contains a review ID pattern to attach revisions to
+      should_append = false
+      if (@options[:optional][:append] === 'true')
+        pattern_response = @http.request_post('/~rpc/getProjectInfo', { 'projectId' => @options[:required][:project] }.to_json, {
+          'Content-Type' => 'application/json',
+          'Authorization' => "Basic #{@options[:required][:auth]}"
+        })
 
-      if (review_response.code.to_i === 200)
-        data = JSON.parse(review_response.body)
-        review_id = data['result']['reviewId']
-        puts "Review ID #{review_id['reviewId']} created"
+        if (pattern_response.code.to_i === 200 && (pattern_data = JSON.parse(pattern_response.body)).include?('result'))
+          review_pattern = pattern_data['result']['codeReviewIdPattern']
+          should_append = !review_pattern.nil? && !(`git log --oneline -1 #{newrev}`.index(/(#{review_pattern.strip.sub('{}', '\d+')})/)).nil?
+        end
+      end
 
-        # Assign our default users, if set
-        if (!@options[:optional][:group].nil? && !@options[:optional][:group].strip.empty?)
-          review_group = {
-            'reviewId' => review_id,
-            'groupId' => @options[:optional][:group].strip,
-            'role' => 2
-          }
-          assign_response = @http.request_post('/~rpc/addGroupToReview', review_group.to_json, {
-            'Content-Type' => 'application/json',
-            'Authorization' => "Basic #{@options[:required][:auth]}"
-          })
+      if (should_append)
+        append_review = {
+          'reviewId' => { 
+            'projectId' => @options[:required][:project], 
+            'reviewId' => Regexp.last_match 
+          },
+          'revisionId' => commits.map { |commit| commit.strip }
+        }
 
-          if (assign_response.code.to_i === 200)
-            puts "Default review group '#{@options[:optional][:group]}' assigned to review"
-          else
-            puts "The default review group '#{@options[:optional][:group]}' could NOT be assigned, manaully assign reviewers"
-          end
+        append_response = @http.request_post('/~rpc/addRevisionToReview', append_review.to_json, {
+          'Content-Type' => 'application/json',
+          'Authorization' => "Basic #{@options[:required][:auth]}"
+        })
+
+        if (append_response.code.to_i === 200)
+          puts "Your revisions were successfully appended to existing review #{Regexp.last_match}"
         else
-          puts "No default review group is set, please manually add reviewers in Upsource"
+          puts "There was an error appending your revisions to the exising review #{Regexp.last_match}, you will have to manually add the revisions in Upsource"
         end
       else
-        puts "There was an error creating the code review: #{review_response.code} -> #{review_response.body}"
+        review = {
+          'projectId' => @options[:required][:project],
+          'revisions' => commits.map { |commit| commit.strip }
+        }
+
+        review_response = @http.request_post('/~rpc/createReview', review.to_json, {
+          'Content-Type' => 'application/json',
+          'Authorization' => "Basic #{@options[:required][:auth]}"
+        })
+
+        if (review_response.code.to_i === 200)
+          data = JSON.parse(review_response.body)
+          review_id = data['result']['reviewId']
+          puts "Review ID #{review_id['reviewId']} created"
+
+          # Assign our default users, if set
+          if (!@options[:optional][:group].nil? && !@options[:optional][:group].strip.empty?)
+            review_group = {
+              'reviewId' => review_id,
+              'groupId' => @options[:optional][:group].strip,
+              'role' => 2
+            }
+            assign_response = @http.request_post('/~rpc/addGroupToReview', review_group.to_json, {
+              'Content-Type' => 'application/json',
+              'Authorization' => "Basic #{@options[:required][:auth]}"
+            })
+
+            if (assign_response.code.to_i === 200)
+              puts "Default review group '#{@options[:optional][:group]}' assigned to review"
+            else
+              puts "The default review group '#{@options[:optional][:group]}' could NOT be assigned, manaully assign reviewers"
+            end
+          else
+            puts "No default review group is set, please manually add reviewers in Upsource"
+          end
+        else
+          puts "There was an error creating the code review: #{review_response.code} -> #{review_response.body}"
+        end
       end
     end
   end
