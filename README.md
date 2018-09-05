@@ -27,6 +27,7 @@ The following variables need to be configured for the hook to work properly (the
 * `reference` - The git reference that you want to monitor (e.g., `devel`, `master`, `releases`, etc)
 * `auth` - Your `login:password` to be used for authenticating to Upsource, Base64 encoded
 * `review-group` (optional) - If you would like to automatically have a group of users assigned to the review, this is the ID of the Group to assign. If you do not specify this, you will need to manually assign reviewers in Upsource
+* `allow-append` (optional) - true/false - If set to true, an existing Review ID can be mentioned in the last commit message and the revisions will be appended to the exisiting review
 
 ## TODO
 This is a quick and dirty implementation that was whipped up to make creating reviews easier on our developers and to help maintain our review process. There are a few things that can (and hopefully will) be improved:
